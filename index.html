@@ -3,25 +3,48 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Deals Feed</title>
+<title>Deals by Seller</title>
 
 <style>
 body{margin:0;font-family:-apple-system,system-ui,Arial;background:#f5f6f7}
 h1{text-align:center;padding:12px}
-#feed{max-width:900px;margin:auto;padding:8px}
-.item{display:flex;gap:12px;background:#fff;border-radius:10px;padding:10px;margin-bottom:10px;box-shadow:0 2px 5px rgba(0,0,0,.06)}
-.item.amazon{border-left:6px solid #ff9900;background:#fff7eb}
+
+#controls{
+  text-align:center;
+  padding:6px;
+}
+.toggle{
+  display:inline-block;
+  margin:4px;
+  padding:6px 10px;
+  border-radius:999px;
+  background:#e5e7eb;
+  cursor:pointer;
+  font-size:18px;
+  user-select:none;
+}
+.toggle.off{opacity:.3}
+
+#feed{max-width:1000px;margin:auto;padding:8px}
+
+.sellerBlock{margin-bottom:18px;background:#e5e7eb;border-radius:12px;padding:8px}
+.sellerTitle{font-weight:700;font-size:18px;padding:6px 10px}
+
+.item{display:flex;gap:12px;background:#fff;border-radius:10px;padding:10px;margin:8px;box-shadow:0 2px 5px rgba(0,0,0,.06)}
+.item.hidden{display:none}
+
 .thumb{width:90px;height:90px;object-fit:cover;border-radius:8px;flex-shrink:0}
 .meta{flex:1}
 .title{font-weight:600;text-decoration:none;color:#111}
-.amazon .title{color:#b45309}
 .desc{font-size:14px;color:#555;margin-top:4px}
 .date{font-size:12px;color:#888;margin-top:6px}
 </style>
 </head>
 
 <body>
-<h1>🔥 Latest Deals</h1>
+<h1>🛒 Deals grouped by seller</h1>
+
+<div id="controls"></div>
 <div id="feed"></div>
 
 <script>
@@ -33,46 +56,112 @@ const feeds=[
   'https://www.chollometro.com/rss/nuevos'
 ];
 
+const feedMeta={
+  'pepper.pl':'🇵🇱',
+  'mydealz.de':'🇩🇪',
+  'hotukdeals.com':'🇬🇧',
+  'dealabs.com':'🇫🇷',
+  'chollometro.com':'🇪🇸'
+};
+
 const feedEl=document.getElementById('feed');
+const ctrlEl=document.getElementById('controls');
+
+let activeFlags={};
 
 const clean=t=>t.replace(/<[^>]*>/g,'').trim();
 const truncate=t=>{
   let w=clean(t).split(/\s+/);
   return w.slice(0,15).join(' ')+(w.length>15?'…':'');
 };
+const getSeller=d=>{
+  let m=d.match(/[-–]\s*([A-Z0-9][A-Za-z0-9 &.'-]+)/);
+  return m?m[1].trim():'Other';
+};
+const getFlag=u=>{
+  for(let k in feedMeta) if(u.includes(k)) return feedMeta[k];
+  return '🌍';
+};
+
+function applyFilter(){
+  document.querySelectorAll('.item').forEach(i=>{
+    i.classList.toggle(
+      'hidden',
+      !activeFlags[i.dataset.flag]
+    );
+  });
+  document.querySelectorAll('.sellerBlock').forEach(b=>{
+    let any=[...b.querySelectorAll('.item')]
+      .some(i=>!i.classList.contains('hidden'));
+    b.style.display=any?'':'none';
+  });
+}
 
 Promise.all(
   feeds.map(f=>
-    fetch('https://api.rss2json.com/v1/api.json?rss_url='+encodeURIComponent(f))
-      .then(r=>r.json())
+    fetch(
+      'https://api.rss2json.com/v1/api.json?count=100&rss_url='+encodeURIComponent(f)
+    ).then(r=>r.json().then(j=>({src:f,data:j})))
   )
-).then(data=>{
-  let items=[];
-  data.forEach(d=>{
-    if(!d.items) return;
-    d.items.forEach(i=>{
-      items.push({
+).then(all=>{
+  let sellers={};
+  let flags=new Set();
+
+  all.forEach(({src,data})=>{
+    (data.items||[]).forEach(i=>{
+      let flag=getFlag(src);
+      flags.add(flag);
+      let seller=getSeller(i.description||'');
+      let d={
         title:i.title||'',
         link:i.link||'',
         desc:i.description||'',
         img:i.thumbnail||'',
-        date:new Date(i.pubDate||0)
-      });
+        date:new Date(i.pubDate||0),
+        flag
+      };
+      (sellers[seller]=sellers[seller]||[]).push(d);
     });
   });
 
-  items
-    .sort((a,b)=>b.date-a.date)
-    .forEach(d=>{
-      let isAmazon=/amazon/i.test(d.title+d.desc+d.link);
+  // build toggles
+  flags.forEach(f=>{
+    activeFlags[f]=true;
+    ctrlEl.insertAdjacentHTML('beforeend',`
+      <span class="toggle" data-flag="${f}">${f}</span>
+    `);
+  });
+
+  ctrlEl.onclick=e=>{
+    let t=e.target.closest('.toggle');
+    if(!t) return;
+    let f=t.dataset.flag;
+    activeFlags[f]=!activeFlags[f];
+    t.classList.toggle('off',!activeFlags[f]);
+    applyFilter();
+  };
+
+  Object.entries(sellers)
+    .sort((a,b)=>Math.max(...b[1].map(x=>x.date))-Math.max(...a[1].map(x=>x.date)))
+    .forEach(([seller,deals])=>{
+      deals.sort((a,b)=>b.date-a.date);
+      let sellerFlags=[...new Set(deals.map(d=>d.flag))].join(' ');
+
       feedEl.insertAdjacentHTML('beforeend',`
-        <div class="item ${isAmazon?'amazon':''}">
-          <img class="thumb" src="${d.img||'https://via.placeholder.com/90'}">
-          <div class="meta">
-            <a class="title" href="${d.link}" target="_blank">${d.title}</a>
-            <div class="desc">${truncate(d.desc)}</div>
-            <div class="date">${d.date.toLocaleString()}</div>
-          </div>
+        <div class="sellerBlock">
+          <div class="sellerTitle">${seller} ${sellerFlags} (${deals.length})</div>
+          ${deals.map(d=>`
+            <div class="item" data-flag="${d.flag}">
+              <img class="thumb" src="${d.img||'https://via.placeholder.com/90'}">
+              <div class="meta">
+                <a class="title" href="${d.link}" target="_blank">
+                  ${d.flag} ${d.title}
+                </a>
+                <div class="desc">${truncate(d.desc)}</div>
+                <div class="date">${d.date.toLocaleString()}</div>
+              </div>
+            </div>
+          `).join('')}
         </div>
       `);
     });
