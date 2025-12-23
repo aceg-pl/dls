@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Deals Feed</title>
+
+<style>
+body{
+  margin:0;
+  font-family:-apple-system,system-ui,Arial;
+  background:#f5f6f7;
+}
+h1{
+  text-align:center;
+  padding:12px;
+}
+#feed{
+  max-width:900px;
+  margin:auto;
+  padding:8px;
+}
+.item{
+  display:flex;
+  gap:12px;
+  background:#fff;
+  border-radius:10px;
+  padding:10px;
+  margin-bottom:10px;
+  box-shadow:0 2px 5px rgba(0,0,0,.06);
+}
+.item.amazon{
+  border-left:6px solid #ff9900;
+  background:#fff7eb;
+}
+.thumb{
+  width:90px;
+  height:90px;
+  object-fit:cover;
+  border-radius:8px;
+  flex-shrink:0;
+}
+.meta{flex:1}
+.title{
+  font-weight:600;
+  text-decoration:none;
+  color:#111;
+}
+.amazon .title{color:#b45309}
+.desc{
+  font-size:14px;
+  color:#555;
+  margin-top:4px;
+}
+.date{
+  font-size:12px;
+  color:#888;
+  margin-top:6px;
+}
+</style>
+</head>
+
+<body>
+<h1>🔥 Latest Deals</h1>
+<div id="feed"></div>
+
+<script>
+const feeds=[
+  'https://www.pepper.pl/rss/wszystkie',
+  'https://www.mydealz.de/rss/alles',
+  'https://www.hotukdeals.com/rss/new',
+  'https://www.dealabs.com/rss/tous',
+  'https://www.chollometro.com/rss/nuevos'
+];
+
+const proxy=u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u);
+const feedEl=document.getElementById('feed');
+
+const clean=t=>t.replace(/<[^>]*>/g,'').trim();
+const truncate=t=>{
+  let w=clean(t).split(/\s+/);
+  return w.slice(0,15).join(' ')+(w.length>15?'…':'');
+};
+
+Promise.all(
+  feeds.map(f=>fetch(proxy(f)).then(r=>r.text()))
+).then(xmls=>{
+  let items=[];
+  xmls.forEach(x=>{
+    let doc=new DOMParser().parseFromString(x,'text/xml');
+    doc.querySelectorAll('item').forEach(i=>{
+      let title=i.querySelector('title')?.textContent||'';
+      let link=i.querySelector('link')?.textContent||'';
+      let desc=i.querySelector('description')?.textContent||'';
+      let date=new Date(i.querySelector('pubDate')?.textContent||0);
+
+      let img=
+        i.querySelector('media\\:thumbnail,thumbnail')?.getAttribute('url')||
+        i.querySelector('media\\:content')?.getAttribute('url')||
+        (desc.match(/img.*?src="(.*?)"/i)||[])[1]||
+        '';
+
+      items.push({title,link,desc,img,date});
+    });
+  });
+
+  items.sort((a,b)=>b.date-a.date).forEach(d=>{
+    let isAmazon=/amazon/i.test(d.title+d.desc+d.link);
+    feedEl.insertAdjacentHTML('beforeend',`
+      <div class="item ${isAmazon?'amazon':''}">
+        <img class="thumb" src="${d.img||'https://via.placeholder.com/90'}">
+        <div class="meta">
+          <a class="title" href="${d.link}" target="_blank">${d.title}</a>
+          <div class="desc">${truncate(d.desc)}</div>
+          <div class="date">${d.date.toLocaleString()}</div>
+        </div>
+      </div>
+    `);
+  });
+});
+</script>
+</body>
+</html>
