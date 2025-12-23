@@ -9,33 +9,78 @@
 body{margin:0;font-family:-apple-system,system-ui,Arial;background:#f5f6f7}
 h1{text-align:center;padding:12px}
 
-#controls{text-align:center;padding:6px}
-.toggle{
-  display:inline-block;margin:4px;padding:6px 10px;
-  border-radius:999px;background:#e5e7eb;
-  cursor:pointer;font-size:18px
+#controls,#sellerFilters{
+  text-align:center;
+  padding:6px;
 }
-.toggle.off{opacity:.3}
+.toggle,.sellerBtn{
+  display:inline-block;
+  margin:4px;
+  padding:6px 10px;
+  border-radius:999px;
+  background:#e5e7eb;
+  cursor:pointer;
+  font-size:15px;
+  user-select:none;
+}
+.toggle.off,.sellerBtn.off{opacity:.35}
+.sellerBtn.active{outline:2px solid #111}
 
 #feed{max-width:1000px;margin:auto;padding:8px}
-.sellerBlock{margin-bottom:18px;background:#e5e7eb;border-radius:12px;padding:8px}
-.sellerTitle{font-weight:700;font-size:18px;padding:6px 10px}
 
-.item{display:flex;gap:12px;background:#fff;border-radius:10px;padding:10px;margin:8px;
-  box-shadow:0 2px 5px rgba(0,0,0,.06)}
+.sellerBlock{
+  margin-bottom:18px;
+  background:#e5e7eb;
+  border-radius:12px;
+  padding:8px;
+}
+.sellerTitle{
+  font-weight:700;
+  font-size:18px;
+  padding:6px 10px;
+}
+
+.item{
+  display:flex;
+  gap:12px;
+  background:#fff;
+  border-radius:10px;
+  padding:10px;
+  margin:8px;
+  box-shadow:0 2px 5px rgba(0,0,0,.06);
+}
 .item.hidden{display:none}
 
-.thumb{width:90px;height:90px;object-fit:cover;border-radius:8px;flex-shrink:0}
+.thumb{
+  width:90px;height:90px;
+  object-fit:cover;
+  border-radius:8px;
+  flex-shrink:0;
+}
 .meta{flex:1}
-.title{font-weight:600;text-decoration:none;color:#111}
-.desc{font-size:14px;color:#555;margin-top:4px}
-.date{font-size:12px;color:#888;margin-top:6px}
+.title{
+  font-weight:600;
+  text-decoration:none;
+  color:#111;
+}
+.desc{
+  font-size:14px;
+  color:#555;
+  margin-top:4px;
+}
+.date{
+  font-size:12px;
+  color:#888;
+  margin-top:6px;
+}
 </style>
 </head>
 
 <body>
 <h1>🛒 Deals grouped by seller</h1>
+
 <div id="controls"></div>
+<div id="sellerFilters"></div>
 <div id="feed"></div>
 
 <script>
@@ -47,7 +92,7 @@ const feeds=[
   'https://www.chollometro.com/rss/nuevos'
 ];
 
-const feedFlags={
+const flagsMap={
   'pepper.pl':'🇵🇱',
   'mydealz.de':'🇩🇪',
   'hotukdeals.com':'🇬🇧',
@@ -56,9 +101,12 @@ const feedFlags={
 };
 
 const proxy=u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u);
+
 const feedEl=document.getElementById('feed');
 const ctrlEl=document.getElementById('controls');
-let activeFlags={};
+const sellerFilterEl=document.getElementById('sellerFilters');
+
+let activeFlags={}, activeSeller=null;
 
 const clean=t=>t.replace(/<[^>]*>/g,'').trim();
 const truncate=t=>{
@@ -70,13 +118,15 @@ const getSeller=d=>{
   return m?m[1].trim():'Other';
 };
 const getFlag=u=>{
-  for(let k in feedFlags) if(u.includes(k)) return feedFlags[k];
+  for(let k in flagsMap) if(u.includes(k)) return flagsMap[k];
   return '🌍';
 };
 
 function applyFilter(){
   document.querySelectorAll('.item').forEach(i=>{
-    i.classList.toggle('hidden',!activeFlags[i.dataset.flag]);
+    let okFlag=activeFlags[i.dataset.flag];
+    let okSeller=!activeSeller||i.dataset.seller===activeSeller;
+    i.classList.toggle('hidden',!(okFlag&&okSeller));
   });
   document.querySelectorAll('.sellerBlock').forEach(b=>{
     b.style.display=[...b.querySelectorAll('.item')]
@@ -88,16 +138,17 @@ Promise.all(
   feeds.map(f=>
     fetch(proxy(f))
       .then(r=>r.text())
-      .then(t=>({src:f,xml:t}))
+      .then(x=>({src:f,xml:x}))
       .catch(()=>null)
   )
 ).then(all=>{
-  let sellers={}, flags=new Set();
+  let sellers={}, sellerCount={}, flags=new Set();
 
   all.filter(Boolean).forEach(({src,xml})=>{
     let doc=new DOMParser().parseFromString(xml,'text/xml');
     doc.querySelectorAll('item').forEach(i=>{
       let desc=i.querySelector('description')?.textContent||'';
+      let seller=getSeller(desc);
       let flag=getFlag(src);
       flags.add(flag);
 
@@ -112,14 +163,16 @@ Promise.all(
         desc,
         img,
         date:new Date(i.querySelector('pubDate')?.textContent||0),
-        flag
+        flag,
+        seller
       };
 
-      let seller=getSeller(desc);
       (sellers[seller]=sellers[seller]||[]).push(d);
+      sellerCount[seller]=(sellerCount[seller]||0)+1;
     });
   });
 
+  // locale toggles
   flags.forEach(f=>{
     activeFlags[f]=true;
     ctrlEl.insertAdjacentHTML('beforeend',
@@ -136,16 +189,37 @@ Promise.all(
     applyFilter();
   };
 
+  // seller filters (sorted by count)
+  Object.entries(sellerCount)
+    .sort((a,b)=>b[1]-a[1])
+    .forEach(([s,c])=>{
+      sellerFilterEl.insertAdjacentHTML('beforeend',
+        `<span class="sellerBtn" data-seller="${s}">${s} (${c})</span>`
+      );
+    });
+
+  sellerFilterEl.onclick=e=>{
+    let b=e.target.closest('.sellerBtn');
+    if(!b)return;
+    let s=b.dataset.seller;
+    activeSeller=activeSeller===s?null:s;
+    document.querySelectorAll('.sellerBtn')
+      .forEach(x=>x.classList.toggle('active',x.dataset.seller===activeSeller));
+    applyFilter();
+  };
+
+  // render sellers
   Object.entries(sellers)
     .sort((a,b)=>Math.max(...b[1].map(x=>x.date))-Math.max(...a[1].map(x=>x.date)))
     .forEach(([seller,deals])=>{
       deals.sort((a,b)=>b.date-a.date);
-      let f=[...new Set(deals.map(d=>d.flag))].join(' ');
+      let sellerFlags=[...new Set(deals.map(d=>d.flag))].join(' ');
+
       feedEl.insertAdjacentHTML('beforeend',`
         <div class="sellerBlock">
-          <div class="sellerTitle">${seller} ${f} (${deals.length})</div>
+          <div class="sellerTitle">${seller} ${sellerFlags} (${deals.length})</div>
           ${deals.map(d=>`
-            <div class="item" data-flag="${d.flag}">
+            <div class="item" data-flag="${d.flag}" data-seller="${d.seller}">
               <img class="thumb" src="${d.img||'https://via.placeholder.com/90'}">
               <div class="meta">
                 <a class="title" href="${d.link}" target="_blank">
