@@ -7,72 +7,39 @@
 
 <style>
 body{margin:0;font-family:-apple-system,system-ui,Arial;background:#f5f6f7}
-h1{text-align:center;padding:12px}
-
-#controls,#sellerFilters{
+h1{
   text-align:center;
-  padding:6px;
+  padding:8px;
+  font-size:12px; /* capped size, not length */
+  font-weight:600;
 }
+
+#controls,#sellerFilters{text-align:center;padding:6px}
 .toggle,.sellerBtn{
-  display:inline-block;
-  margin:4px;
-  padding:6px 10px;
-  border-radius:999px;
-  background:#e5e7eb;
-  cursor:pointer;
-  font-size:15px;
-  user-select:none;
+  display:inline-block;margin:4px;padding:6px 10px;
+  border-radius:999px;background:#e5e7eb;
+  cursor:pointer;font-size:14px;user-select:none
 }
 .toggle.off,.sellerBtn.off{opacity:.35}
 .sellerBtn.active{outline:2px solid #111}
 
 #feed{max-width:1000px;margin:auto;padding:8px}
 
-.sellerBlock{
-  margin-bottom:18px;
-  background:#e5e7eb;
-  border-radius:12px;
-  padding:8px;
-}
-.sellerTitle{
-  font-weight:700;
-  font-size:18px;
-  padding:6px 10px;
-}
+.sellerBlock{margin-bottom:18px;background:#e5e7eb;border-radius:12px;padding:8px}
+.sellerTitle{font-weight:700;font-size:16px;padding:6px 10px}
 
 .item{
-  display:flex;
-  gap:12px;
-  background:#fff;
-  border-radius:10px;
-  padding:10px;
-  margin:8px;
-  box-shadow:0 2px 5px rgba(0,0,0,.06);
+  display:flex;gap:12px;background:#fff;border-radius:10px;
+  padding:10px;margin:8px;box-shadow:0 2px 5px rgba(0,0,0,.06)
 }
 .item.hidden{display:none}
 
-.thumb{
-  width:90px;height:90px;
-  object-fit:cover;
-  border-radius:8px;
-  flex-shrink:0;
-}
+.thumb{width:90px;height:90px;object-fit:cover;border-radius:8px;flex-shrink:0}
 .meta{flex:1}
-.title{
-  font-weight:600;
-  text-decoration:none;
-  color:#111;
-}
-.desc{
-  font-size:14px;
-  color:#555;
-  margin-top:4px;
-}
-.date{
-  font-size:12px;
-  color:#888;
-  margin-top:6px;
-}
+.title{font-weight:600;text-decoration:none;color:#111}
+.desc{font-size:14px;color:#555;margin-top:4px}
+.date{font-size:12px;color:#888;margin-top:6px}
+.price{font-weight:700}
 </style>
 </head>
 
@@ -106,17 +73,30 @@ const feedEl=document.getElementById('feed');
 const ctrlEl=document.getElementById('controls');
 const sellerFilterEl=document.getElementById('sellerFilters');
 
-let activeFlags={}, activeSeller=null;
+let activeFlags={},activeSeller=null;
 
 const clean=t=>t.replace(/<[^>]*>/g,'').trim();
-const truncate=t=>{
-  let w=clean(t).split(/\s+/);
-  return w.slice(0,15).join(' ')+(w.length>15?'…':'');
+const truncate=t=>clean(t).split(/\s+/).slice(0,15).join(' ')+'…';
+
+const normalizeSeller=s=>{
+  if(!s) return 'Other';
+  if(/amazon/i.test(s)) return 'Amazon';
+  return s.trim();
 };
-const getSeller=d=>{
+
+const extractPriceDesc=d=>{
+  let m=d.match(/([€£$]\s?\d+(?:[\.,]\d+)?)/);
+  if(!m) return {price:'',text:truncate(d)};
+  let price=m[1];
+  let text=truncate(d.replace(m[0],'').replace(/-\s*\w.+?/,''));
+  return {price,text};
+};
+
+const getSellerFromDesc=d=>{
   let m=d.match(/[-–]\s*([A-Z0-9][A-Za-z0-9 &.'-]+)/);
-  return m?m[1].trim():'Other';
+  return normalizeSeller(m?m[1]:'Other');
 };
+
 const getFlag=u=>{
   for(let k in flagsMap) if(u.includes(k)) return flagsMap[k];
   return '🌍';
@@ -124,9 +104,9 @@ const getFlag=u=>{
 
 function applyFilter(){
   document.querySelectorAll('.item').forEach(i=>{
-    let okFlag=activeFlags[i.dataset.flag];
-    let okSeller=!activeSeller||i.dataset.seller===activeSeller;
-    i.classList.toggle('hidden',!(okFlag&&okSeller));
+    let okF=activeFlags[i.dataset.flag];
+    let okS=!activeSeller||i.dataset.seller===activeSeller;
+    i.classList.toggle('hidden',!(okF&&okS));
   });
   document.querySelectorAll('.sellerBlock').forEach(b=>{
     b.style.display=[...b.querySelectorAll('.item')]
@@ -136,48 +116,48 @@ function applyFilter(){
 
 Promise.all(
   feeds.map(f=>
-    fetch(proxy(f))
-      .then(r=>r.text())
-      .then(x=>({src:f,xml:x}))
-      .catch(()=>null)
+    fetch(proxy(f)).then(r=>r.text()).then(x=>({src:f,xml:x})).catch(()=>null)
   )
 ).then(all=>{
-  let sellers={}, sellerCount={}, flags=new Set();
+  let sellers={},counts={},flags=new Set();
 
   all.filter(Boolean).forEach(({src,xml})=>{
     let doc=new DOMParser().parseFromString(xml,'text/xml');
     doc.querySelectorAll('item').forEach(i=>{
       let desc=i.querySelector('description')?.textContent||'';
-      let seller=getSeller(desc);
+      let seller=getSellerFromDesc(desc);
       let flag=getFlag(src);
       flags.add(flag);
+      counts[seller]=(counts[seller]||0)+1;
 
       let img=
         i.querySelector('media\\:thumbnail,thumbnail')?.getAttribute('url')||
-        (desc.match(/img.*?src="(.*?)"/i)||[])[1]||
-        '';
+        (desc.match(/img.*?src="(.*?)"/i)||[])[1]||'';
+
+      let {price,text}=extractPriceDesc(desc);
 
       let d={
         title:i.querySelector('title')?.textContent||'',
         link:i.querySelector('link')?.textContent||'',
-        desc,
-        img,
+        price,text,img,
         date:new Date(i.querySelector('pubDate')?.textContent||0),
-        flag,
-        seller
+        flag,seller
       };
-
       (sellers[seller]=sellers[seller]||[]).push(d);
-      sellerCount[seller]=(sellerCount[seller]||0)+1;
     });
   });
 
-  // locale toggles
+  // regroup <3 into Other
+  Object.keys(sellers).forEach(s=>{
+    if(counts[s]<3 && s!=='Other'){
+      sellers.Other=(sellers.Other||[]).concat(sellers[s]);
+      delete sellers[s];
+    }
+  });
+
   flags.forEach(f=>{
     activeFlags[f]=true;
-    ctrlEl.insertAdjacentHTML('beforeend',
-      `<span class="toggle" data-flag="${f}">${f}</span>`
-    );
+    ctrlEl.insertAdjacentHTML('beforeend',`<span class="toggle" data-flag="${f}">${f}</span>`);
   });
 
   ctrlEl.onclick=e=>{
@@ -189,50 +169,40 @@ Promise.all(
     applyFilter();
   };
 
-  // seller filters (sorted by count)
-  Object.entries(sellerCount)
-    .sort((a,b)=>b[1]-a[1])
-    .forEach(([s,c])=>{
+  Object.entries(sellers)
+    .sort((a,b)=>b[1].length-a[1].length)
+    .forEach(([s,d])=>{
       sellerFilterEl.insertAdjacentHTML('beforeend',
-        `<span class="sellerBtn" data-seller="${s}">${s} (${c})</span>`
+        `<span class="sellerBtn" data-seller="${s}">${s} (${d.length})</span>`
       );
     });
 
   sellerFilterEl.onclick=e=>{
     let b=e.target.closest('.sellerBtn');
     if(!b)return;
-    let s=b.dataset.seller;
-    activeSeller=activeSeller===s?null:s;
+    activeSeller=activeSeller===b.dataset.seller?null:b.dataset.seller;
     document.querySelectorAll('.sellerBtn')
       .forEach(x=>x.classList.toggle('active',x.dataset.seller===activeSeller));
     applyFilter();
   };
 
-  // render sellers
-  Object.entries(sellers)
-    .sort((a,b)=>Math.max(...b[1].map(x=>x.date))-Math.max(...a[1].map(x=>x.date)))
-    .forEach(([seller,deals])=>{
-      deals.sort((a,b)=>b.date-a.date);
-      let sellerFlags=[...new Set(deals.map(d=>d.flag))].join(' ');
-
-      feedEl.insertAdjacentHTML('beforeend',`
-        <div class="sellerBlock">
-          <div class="sellerTitle">${seller} ${sellerFlags} (${deals.length})</div>
-          ${deals.map(d=>`
-            <div class="item" data-flag="${d.flag}" data-seller="${d.seller}">
-              <img class="thumb" src="${d.img||'https://via.placeholder.com/90'}">
-              <div class="meta">
-                <a class="title" href="${d.link}" target="_blank">
-                  ${d.flag} ${d.title}
-                </a>
-                <div class="desc">${truncate(d.desc)}</div>
-                <div class="date">${d.date.toLocaleString()}</div>
-              </div>
+  Object.entries(sellers).forEach(([seller,deals])=>{
+    deals.sort((a,b)=>b.date-a.date);
+    feedEl.insertAdjacentHTML('beforeend',`
+      <div class="sellerBlock">
+        <div class="sellerTitle">${seller} (${deals.length})</div>
+        ${deals.map(d=>`
+          <div class="item" data-flag="${d.flag}" data-seller="${d.seller}">
+            <img class="thumb" src="${d.img||'https://via.placeholder.com/90'}">
+            <div class="meta">
+              <a class="title" href="${d.link}" target="_blank">${d.flag} ${d.title}</a>
+              <div class="desc"><span class="price">${d.price}</span> ${d.text}</div>
+              <div class="date">${d.date.toLocaleString()}</div>
             </div>
-          `).join('')}
-        </div>
-      `);
-    });
+          </div>`).join('')}
+      </div>
+    `);
+  });
 });
 </script>
 </body>
